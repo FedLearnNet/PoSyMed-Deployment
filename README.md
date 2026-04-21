@@ -1,93 +1,213 @@
-# PosyMed deploymemnt
+# PosyMed Deployment
 
+Docker Compose deployment for the PosyMed federated learning stack.
 
+The stack contains:
 
-## Getting started
+- global learning API and database
+- orchestrator API with access to the host Docker daemon
+- frontend
+- Keycloak and Keycloak database
+- nginx reverse proxy
+- user documentation
+- local Docker registry on port `5000`
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Requirements
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- Docker Engine with the Compose plugin
+- access to the GitLab container registry used by the service images
+- a host where port `8291` is available for the reverse proxy
+- a host where port `5000` is available for the local Docker registry
 
-## Add your files
+## Configuration
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Runtime configuration lives in `env/*.env`.
 
+Before starting the stack, review and update at least:
+
+- `env/orch-api.env`
+- `env/global-api.env`
+- `env/keycloak.env`
+- `env/global-learning-db.env`
+- `env/keycloak-postgres.env`
+- `env/nginx.env`
+
+The compose services currently pull PosyMed images from `gitlab.cosy.bio:5050`.
+Log in on the deployment host before the first start:
+
+```sh
+docker login gitlab.cosy.bio:5050
 ```
-cd existing_repo
-git remote add origin https://gitlab.cosy.bio/cosybio/federated-learning/federated_db/posymed-deploymemnt.git
-git branch -M main
-git push -uf origin main
+
+## Local Docker Registry
+
+The deployment includes a local registry:
+
+```yaml
+registry:
+  image: registry:2
+  ports:
+    - "5000:5000"
 ```
 
-## Integrate with your tools
+Registry data is stored in the named Docker volume `posymed_registry-data`.
+Using a named volume keeps registry data outside the repository and avoids
+accidentally committing image layers.
 
-* [Set up project integrations](https://gitlab.cosy.bio/cosybio/federated-learning/federated_db/posymed-deploymemnt/-/settings/integrations)
+The registry uses Docker Registry's native `htpasswd` authentication. For this
+deployment, the password is treated like an API key: generate a long random
+value once, store only its bcrypt hash in `registry-auth/htpasswd`, and put the
+plain value into the orchestrator env.
 
-## Collaborate with your team
+Generate the local registry API key and htpasswd file:
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```sh
+mkdir -p registry-auth
 
-## Test and Deploy
+REGISTRY_USER=posymed
+REGISTRY_API_KEY="$(openssl rand -base64 32)"
 
-Use the built-in continuous integration in GitLab.
+docker run --rm --entrypoint htpasswd httpd:2 \
+  -Bbn "$REGISTRY_USER" "$REGISTRY_API_KEY" > registry-auth/htpasswd
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+printf '%s\n' "$REGISTRY_API_KEY"
+```
 
-***
+Copy the printed value into `env/orch-api.env`:
 
-# Editing this README
+```env
+ORCH_DOCKER__LOCAL__REGISTRY_USERNAME=posymed
+ORCH_DOCKER__LOCAL__REGISTRY_PASSWORD=<printed registry api key>
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Use the same values for manual Docker login:
 
-## Suggestions for a good README
+```sh
+docker login localhost:5000
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+The orchestrator is configured in `env/orch-api.env` with:
 
-## Name
-Choose a self-explaining name for your project.
+```env
+ORCH_DOCKER__LOCAL__REGISTRY_URL=localhost:5000
+ORCH_DOCKER__LOCAL__ENABLED=true
+ORCH_DOCKER__LOCAL__REGISTRY_USERNAME=posymed
+ORCH_DOCKER__LOCAL__REGISTRY_PASSWORD=<printed registry api key>
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+`localhost:5000` is intentional when the orchestrator talks to the host Docker
+daemon through `/var/run/docker.sock`: the Docker daemon resolves and pulls the
+image from the deployment host. If the registry is moved to another machine,
+replace this with the registry host name or IP, for example
+`registry.example.org:5000`.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Quick registry check:
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+```sh
+curl -u posymed:<printed registry api key> http://localhost:5000/v2/
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Expected result: `{}`.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## Orchestrator Registries
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+`env/orch-api.env` defines the registries known by the orchestrator:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```env
+ORCH_DOCKER__LOCAL__REGISTRY_URL=localhost:5000
+ORCH_DOCKER__LOCAL__ENABLED=true
+ORCH_DOCKER__LOCAL__REGISTRY_USERNAME=posymed
+ORCH_DOCKER__LOCAL__REGISTRY_PASSWORD=<printed registry api key>
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+ORCH_DOCKER__FEATURECLOUD__REGISTRY_URL=featurecloud.ai
+ORCH_DOCKER__FEATURECLOUD__ENABLED=true
+# ORCH_DOCKER__FEATURECLOUD__REGISTRY_USERNAME=simon.suewer@uni-hamburg.de
+# ORCH_DOCKER__FEATURECLOUD__REGISTRY_PASSWORD=<insert featurecloud registry token>
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+ORCH_DOCKER__GITLAB__REGISTRY_URL=gitlab.cosy.bio
+ORCH_DOCKER__GITLAB__ENABLED=true
+# ORCH_DOCKER__GITLAB__REGISTRY_USERNAME=simon.suewer@uni-hamburg.de
+ORCH_DOCKER__GITLAB__REGISTRY_PASSWORD=
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Quarkus maps these environment variables to properties like
+`orch.docker."gitlab".registry-url`.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## Secrets
 
-## License
-For open source projects, say how it is licensed.
+Do not commit real secrets. Keep the values in the deployment host environment
+or in the local `env/*.env` files used for that host.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Generate strong local passwords with:
+
+```sh
+openssl rand -base64 32
+```
+
+Create GitLab tokens in GitLab under user, project, or group access tokens.
+Use the smallest scope that works for the deployment. Common examples are:
+
+- `read_registry` for pulling private images
+- `write_registry` only when pushing images
+- `read_api` or `api` only if the pipeline integration requires API access
+
+Insert secret values by editing the right variable after the `=` sign:
+
+```env
+ORCH_DOCKER__GITLAB__REGISTRY_PASSWORD=<gitlab registry token>
+ORCH_DOCKER__LOCAL__REGISTRY_PASSWORD=<printed registry api key>
+PIPELINE_DOCKER_PASSWORD=<gitlab registry token>
+PIPELINE_REPO_TOKEN=<gitlab api/project token>
+QUARKUS_OIDC_CREDENTIALS_SECRET=<keycloak client secret>
+QUARKUS_KEYCLOAK_ADMIN_CLIENT_CLIENT_SECRET=<keycloak client secret>
+QUARKUS_LANGCHAIN4J_OPENAI_API_KEY=<openai or ollama api key, if used>
+KC_BOOTSTRAP_ADMIN_PASSWORD=<generated admin password>
+```
+
+For Keycloak client secrets, open the Keycloak admin UI after import and copy
+the generated client secret for the configured client into `env/global-api.env`.
+
+## Start
+
+Start the stack:
+
+```sh
+docker compose up -d
+```
+
+Show service status:
+
+```sh
+docker compose ps
+```
+
+Follow logs:
+
+```sh
+docker compose logs -f
+```
+
+The reverse proxy publishes the application on host port `8291`.
+
+## Update
+
+Pull current images and recreate services:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+## Stop
+
+Stop containers while keeping volumes:
+
+```sh
+docker compose down
+```
+
+Remove containers and volumes only when the deployment data can be deleted:
+
+```sh
+docker compose down -v
+```

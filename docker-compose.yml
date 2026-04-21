@@ -1,0 +1,161 @@
+services:
+  global-learning-api:
+    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/global-learning-apis/global-learning-api:staging
+    env_file:
+      - env/global-api.env
+    restart: always
+    pull_policy: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - posymed-network
+    depends_on:
+      global-learning-db:
+        condition: service_healthy
+
+  global-learning-db:
+    image: pgvector/pgvector:pg18
+    env_file:
+      - env/global-learning-db.env
+    restart: always
+    volumes:
+      - global-learning-db-volume:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U user -d global-learning-management"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - posymed-network
+
+  orch-api:
+    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/orch-api/orch-api:staging
+    user: "0:0"  # run as root to access docker socket
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: always
+    pull_policy: always
+    env_file:
+      - env/orch-api.env
+    networks:
+      - posymed-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - orch-data-volume:/mnt/input:rw
+    depends_on:
+      global-learning-db:
+        condition: service_healthy
+
+  registry:
+    image: registry:2
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: PosyMed Local Registry
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+    volumes:
+      - registry-data-volume:/var/lib/registry
+      - ./registry-auth:/auth:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -S -O - http://localhost:5000/v2/ 2>&1 | grep -Eq 'HTTP/[0-9.]+ 401|HTTP/[0-9.]+ 200'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - posymed-network
+
+  frontend:
+    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/frontend-shared/global-posymed:staging
+    restart: always
+    pull_policy: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - posymed-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    restart: always
+    command:
+      - "start"
+      - "--import-realm"
+      - "--health-enabled=true"
+    env_file:
+      - env/keycloak.env
+    networks:
+      - posymed-network
+    volumes:
+      # Mount the realm file directly into the auto-import directory
+      - ./keycloak-realms:/opt/keycloak/data/import/
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+
+  keycloak-postgres:
+    image: postgres:latest
+    restart: always
+    volumes:
+      - keycloak_postgres_volume:/var/lib/postgresql
+    env_file:
+      - env/keycloak-postgres.env
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=keycloak
+      - PGUSER=keycloak
+    networks:
+      - posymed-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+
+  reverse-proxy:
+    image: nginx:latest # Or a specific version if needed
+    env_file:
+      - env/nginx.env
+    ports:
+      - 8291:80
+    networks:
+      - posymed-network
+    restart: always
+      # sometimes nginx is to fast. While during runtime it will retry to find the upstream servers,
+      # on startup it will just die. In this case we just restart the nginx and get it to runtime
+      # mode where it's more flexible/robust
+    volumes:
+      - ./nginx_server.conf:/etc/nginx/nginx.conf # overwrite the nginx conv to include sites-enabled
+      - ./nginx.conf:/etc/nginx/sites-available/server_nginx.conf
+      - ./nginx.conf:/etc/nginx/sites-enabled/server_nginx.conf
+    depends_on:
+      - frontend
+      - orch-api
+      - global-learning-api
+      - documentation
+      - keycloak
+
+  documentation:
+    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/user-documentation/posymed-user-doc:latest
+    networks:
+      - posymed-network
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  global-learning-db-volume:
+  keycloak_postgres_volume:
+  orch-data-volume:
+    name: posymed_orch-data
+  registry-data-volume:
+    name: posymed_registry-data
+
+networks:
+  posymed-network:
+    driver: bridge

@@ -1,0 +1,4 @@
+.DS_Store
+registry-auth/htpasswd
+registry-auth/*.bak
+test_secret.txt
