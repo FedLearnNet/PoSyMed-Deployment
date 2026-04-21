@@ -1,6 +1,6 @@
 services:
   global-learning-api:
-    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/global-learning-apis/global-learning-api:staging
+    image: ghcr.io/fedlearnnet/global-learning-apis/global-learning-api:latest
     env_file:
       - env/global-api.env
     restart: always
@@ -31,7 +31,7 @@ services:
       - posymed-network
 
   orch-api:
-    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/orch-api/orch-api:staging
+    image: ghcr.io/fedlearnnet/orch-api/orch-api:latest
     user: "0:0"  # run as root to access docker socket
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
@@ -71,7 +71,7 @@ services:
       - posymed-network
 
   frontend:
-    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/frontend-shared/global-posymed:staging
+    image: ghcr.io/fedlearnnet/frontend/global-posymed:staging
     restart: always
     pull_policy: always
     labels:
@@ -141,7 +141,7 @@ services:
       - keycloak
 
   documentation:
-    image: gitlab.cosy.bio:5050/cosybio/federated-learning/federated_db/user-documentation/posymed-user-doc:latest
+    image: ghcr.io/fedlearnnet/user-doc/posymed-user-doc:latest
     networks:
       - posymed-network
     restart: always
