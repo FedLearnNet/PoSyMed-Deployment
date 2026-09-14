@@ -1,3 +1,10 @@
+# Disclaimer
+As PosyMed has been integrated into the FL-Net project, please instead refer to the deployment 
+of an FL-Net Platform which incorperates PosyMed, additionally offering federated learning capabilities.
+The Posymed deployment itself is not mantained anymore but instead handled via FL-Net Platform deployment.
+- [FL-Net Platform deployment repository](https://github.com/FedLearnNet/FL-Net-Platform-Deployment.git)
+- [FL-Net Platform deployment documentation](https://federated-learning.net/documentation/docs/deployment/self-deployment-guide)
+
 # PosyMed Deployment
 
 Docker Compose deployment for the PosyMed federated learning stack.
