@@ -5,7 +5,7 @@ services:
     restart: always
     pull_policy: always
     # Same host port the old PoSyMed reverse proxy used, so an existing
-    # upstream proxy for posymed.featurecloud.ai keeps working unchanged.
+    # upstream proxy (e.g. https://apps.cosy.bio/posymed) keeps working.
     ports:
       - "8291:8080"
     cap_drop:

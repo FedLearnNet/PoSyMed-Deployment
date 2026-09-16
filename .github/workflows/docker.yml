@@ -57,11 +57,17 @@ jobs:
             curl -fsS http://localhost:8080/healthz && break
             sleep 1
           done
-          curl -fsS http://localhost:8080/ | grep -q "PoSyMed is now"
-          curl -fsS http://localhost:8080/styles.css > /dev/null
-          curl -fsS http://localhost:8080/img/fl-net-logo.png > /dev/null
-          curl -fsS http://localhost:8080/img/posymed-logo.png > /dev/null
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/documentation/)" = 302
+          base=http://localhost:8080
+          curl -fsS "$base/" | grep -q '<base href="/posymed/">'
+          # Old deep links show the notice directly
+          curl -fsS "$base/documentation/docs/intro" | grep -q "PoSyMed is now"
+          # Assets resolve with and without the /posymed prefix (proxy may strip it)
+          for prefix in "" /posymed; do
+            curl -fsS -o /dev/null "$base$prefix/styles.css"
+            curl -fsS -o /dev/null "$base$prefix/img/fl-net-logo.png"
+            curl -fsS -o /dev/null "$base$prefix/img/posymed-logo.png"
+            curl -fsS -o /dev/null "$base$prefix/img/favicon.png"
+          done
           docker rm -f notice
 
       - name: Build and push multi-arch image

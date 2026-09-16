@@ -20,4 +20,7 @@ It is no longer maintained, and its `env/` and Keycloak realm files were removed
 docker compose up -d
 ```
 
-The page is served on port `8291`. Every other path redirects to the notice.
+The page is served on port `8291` and published at
+<https://apps.cosy.bio/posymed/>. `<base href="/posymed/">` in `site/index.html`
+pins all asset links to that prefix, and nginx serves the assets with or without
+it. Every other path shows the notice.
