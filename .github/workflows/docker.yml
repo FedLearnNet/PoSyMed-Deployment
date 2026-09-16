@@ -1,0 +1,77 @@
+name: Docker image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "nginx.conf"
+      - "site/**"
+      - ".github/workflows/docker.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "nginx.conf"
+      - "site/**"
+      - ".github/workflows/docker.yml"
+  schedule:
+    # Weekly rebuild picks up patched Chainguard nginx base images
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/fedlearnnet/posymed-deployment/posymed-notice
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pull requests only build and smoke-test; pushes to main also publish
+      - name: Build for smoke test
+        run: docker buildx build --load -t posymed-notice:test .
+
+      - name: Smoke test
+        run: |
+          docker run -d --name notice -p 8080:8080 posymed-notice:test
+          for _ in $(seq 1 20); do
+            curl -fsS http://localhost:8080/healthz && break
+            sleep 1
+          done
+          curl -fsS http://localhost:8080/ | grep -q "PoSyMed is now"
+          curl -fsS http://localhost:8080/styles.css > /dev/null
+          curl -fsS http://localhost:8080/img/fl-net-logo.png > /dev/null
+          curl -fsS http://localhost:8080/img/posymed-logo.png > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/documentation/)" = 302
+          docker rm -f notice
+
+      - name: Build and push multi-arch image
+        if: github.event_name != 'pull_request'
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=false \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:${GITHUB_SHA::7}" \
+            --push .
